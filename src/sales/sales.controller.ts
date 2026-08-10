@@ -6,6 +6,7 @@ import {
   GenerateQrDto,
   GetQrCodeStatusDto,
   SalesListDto,
+  CancelSaleDto,
 } from './dto';
 import { SalesService } from './sales.service';
 
@@ -79,5 +80,11 @@ export class SalesController {
   @MessagePattern('sales.personSalesRecords')
   async getPersonSalesRecords(@Payload('personId', ParseIntPipe) personId: number) {
     return this.salesService.getPersonSalesRecords(personId);
+  }
+
+  // Para anular una venta
+  @MessagePattern('sales.cancelSale')
+  async cancelSale(@Payload() data: CancelSaleDto) {
+    return this.salesService.cancelSale(data);
   }
 }

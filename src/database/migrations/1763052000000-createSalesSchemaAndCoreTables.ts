@@ -112,6 +112,7 @@ export class CreateSalesSchemaAndCoreTables1763052000000
     await this.createProductsTable(queryRunner);
     await this.createPaymentTypesTable(queryRunner);
     await this.createSalesTable(queryRunner);
+    await this.createSaleCancellationsTable(queryRunner);
     await this.createVouchersTable(queryRunner);
     await this.createQrPaymentSalesTable(queryRunner);
     await this.createSaleProductsTable(queryRunner);
@@ -156,6 +157,19 @@ export class CreateSalesSchemaAndCoreTables1763052000000
     if (await queryRunner.hasTable(`${this.schema}.vouchers`)) {
       await queryRunner.dropTable(`${this.schema}.vouchers`, true, true, true);
     }
+
+    if (await queryRunner.hasTable(`${this.schema}.sale_cancellations`)) {
+      await queryRunner.dropTable(
+        `${this.schema}.sale_cancellations`,
+        true,
+        true,
+        true
+      );
+    }
+
+    await queryRunner.query(
+      `DROP FUNCTION IF EXISTS "${this.schema}"."prevent_sale_cancellation_mutation"()`
+    );
 
     if (await queryRunner.hasTable(`${this.schema}.sales`)) {
       await queryRunner.dropTable(`${this.schema}.sales`, true, true, true);
@@ -648,6 +662,119 @@ export class CreateSalesSchemaAndCoreTables1763052000000
       `CREATE UNIQUE INDEX IF NOT EXISTS "UQ_sales_transaction_id"
        ON "${this.schema}"."sales" ("transaccion_id")
        WHERE "transaccion_id" IS NOT NULL`
+    );
+  }
+
+  private async createSaleCancellationsTable(
+    queryRunner: QueryRunner
+  ): Promise<void> {
+    if (await queryRunner.hasTable(`${this.schema}.sale_cancellations`)) {
+      return;
+    }
+
+    await queryRunner.createTable(
+      new Table({
+        schema: this.schema,
+        name: "sale_cancellations",
+        columns: [
+          {
+            name: "id",
+            type: "int",
+            isPrimary: true,
+            isGenerated: true,
+            generationStrategy: "increment",
+          },
+          {
+            name: "sale_id",
+            type: "int",
+            isNullable: false,
+          },
+          {
+            name: "reason",
+            type: "varchar",
+            length: "500",
+            isNullable: false,
+          },
+          {
+            name: "cancelled_by_user",
+            type: "varchar",
+            length: "100",
+            isNullable: false,
+          },
+          {
+            name: "cancelled_at",
+            type: "timestamptz",
+            default: "now()",
+            isNullable: false,
+          },
+          {
+            name: "created_at",
+            type: "timestamptz",
+            default: "now()",
+            isNullable: false,
+          },
+          {
+            name: "updated_at",
+            type: "timestamptz",
+            default: "now()",
+            isNullable: false,
+          },
+          {
+            name: "deleted_at",
+            type: "timestamptz",
+            isNullable: true,
+          },
+        ],
+        uniques: [
+          new TableUnique({
+            name: "UQ_sale_cancellations_sale_id",
+            columnNames: ["sale_id"],
+          }),
+        ],
+        checks: [
+          new TableCheck({
+            name: "CHK_sale_cancellations_reason_not_blank",
+            expression: 'char_length(btrim("reason")) > 0',
+          }),
+          new TableCheck({
+            name: "CHK_sale_cancellations_cancelled_by_user_not_blank",
+            expression: 'char_length(btrim("cancelled_by_user")) > 0',
+          }),
+        ],
+      })
+    );
+
+    await queryRunner.createForeignKey(
+      `${this.schema}.sale_cancellations`,
+      new TableForeignKey({
+        name: "FK_sale_cancellations_sale",
+        columnNames: ["sale_id"],
+        referencedSchema: this.schema,
+        referencedTableName: "sales",
+        referencedColumnNames: ["id"],
+        onDelete: "NO ACTION",
+        onUpdate: "NO ACTION",
+      })
+    );
+
+    await queryRunner.query(
+      `CREATE OR REPLACE FUNCTION "${this.schema}"."prevent_sale_cancellation_mutation"()
+       RETURNS TRIGGER
+       LANGUAGE plpgsql
+       AS $$
+       BEGIN
+         RAISE EXCEPTION
+           'Los registros de anulación de ventas son inmutables';
+       END;
+       $$`
+    );
+
+    await queryRunner.query(
+      `CREATE TRIGGER "TRG_prevent_sale_cancellation_mutation"
+       BEFORE UPDATE OR DELETE OR TRUNCATE
+       ON "${this.schema}"."sale_cancellations"
+       FOR EACH STATEMENT
+       EXECUTE FUNCTION "${this.schema}"."prevent_sale_cancellation_mutation"()`
     );
   }
 
@@ -1284,12 +1411,6 @@ export class CreateSalesSchemaAndCoreTables1763052000000
         ]
       );
     }
-
-    await queryRunner.query(
-      `DELETE FROM "${this.schema}"."groups"
-       WHERE "id" = ANY($1)`,
-      [[3, 4, 5]]
-    );
 
     await queryRunner.query(
       `INSERT INTO "${this.schema}"."parameters" ("id", "max_amount_product", "max_products", "currency_symbol", "is_active")

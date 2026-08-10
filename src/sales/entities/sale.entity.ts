@@ -21,6 +21,7 @@ import {
 import { Parameter } from './parameter.entity';
 import { SaleProduct } from './sale-product.entity';
 import { Voucher } from './voucher.entity';
+import { SaleCancellation } from './sale-cancellation.entity';
 
 @Entity('sales')
 @Check('CHK_sales_code_format', '"code" ~ \'^VEN[0-9]{8}/[0-9]{4}$\'')
@@ -71,6 +72,9 @@ export class Sale {
 
   @OneToOne(() => Voucher, (voucher) => voucher.sale)
   voucher: Voucher | null;
+
+  @OneToOne(() => SaleCancellation, (cancellation) => cancellation.sale)
+  cancellation: SaleCancellation | null;
 
   @OneToMany(() => SaleProduct, (saleProduct) => saleProduct.sale, {
     cascade: true,

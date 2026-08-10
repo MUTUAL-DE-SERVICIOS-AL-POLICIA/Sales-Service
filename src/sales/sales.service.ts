@@ -28,6 +28,7 @@ import {
   QrPaymentSale,
   QrPaymentStatus,
   Sale,
+  SaleCancellation,
   SaleProduct,
   SaleProductFileNumber,
   SaleState,
@@ -38,6 +39,7 @@ import {
   BcbPaymentNotificationDto,
   BcbQrDataDto,
   CollectionState,
+  CancelSaleDto,
   CreateCollectionTransactionDto,
   CreateSaleDto,
   GenerateQrDto,
@@ -758,6 +760,105 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         message: 'Error al crear la venta.',
         data: null,
       };
+    }
+  }
+
+  async cancelSale(payload: CancelSaleDto): Promise<any> {
+    const saleId = Number(payload.saleId);
+    const reason = String(payload.reason ?? '').trim();
+    const cancelledByUser = String(payload.cancelledByUser ?? '').trim();
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const sale = await manager
+          .getRepository(Sale)
+          .createQueryBuilder('sale')
+          .setLock('pessimistic_write')
+          .where('sale.id = :saleId', { saleId })
+          .getOne();
+
+        if (!sale) {
+          throw new RpcException({
+            code: HttpStatus.NOT_FOUND,
+            message: `La venta con el ID ${saleId} no existe.`,
+          });
+        }
+
+        if (sale.saleState !== SaleState.VIGENTE) {
+          throw new RpcException({
+            code: HttpStatus.CONFLICT,
+            message:
+              sale.saleState === SaleState.ANULADO
+                ? 'La venta ya se encuentra anulada.'
+                : `Solo se puede anular una venta VIGENTE. Estado actual: ${sale.saleState}.`,
+          });
+        }
+
+        const saleProducts = await manager.getRepository(SaleProduct).find({
+          select: {
+            id: true,
+            fileNumbers: {
+              id: true,
+            },
+          },
+          where: {
+            sale: {
+              id: saleId,
+            },
+          },
+          relations: {
+            fileNumbers: true,
+          },
+        });
+
+        sale.saleState = SaleState.ANULADO;
+        await manager.save(Sale, sale);
+
+        const cancellation = await manager.save(
+          SaleCancellation,
+          manager.create(SaleCancellation, {
+            sale,
+            reason,
+            cancelledByUser,
+            cancelledAt: new Date(),
+          }),
+        );
+
+        const retainedFileNumbers = saleProducts.reduce(
+          (total, saleProduct) =>
+            total + Number(saleProduct.fileNumbers?.length ?? 0),
+          0,
+        );
+
+        return {
+          error: false,
+          message: 'Venta anulada correctamente.',
+          data: {
+            saleId: sale.id,
+            code: this.formatSaleCode(sale.code, sale.createdAt),
+            saleState: sale.saleState,
+            affectedProducts: saleProducts.length,
+            retainedFileNumbers,
+            cancellation: {
+              id: cancellation.id,
+              reason: cancellation.reason,
+              cancelledByUser: cancellation.cancelledByUser,
+              cancelledAt: this.formatDate(cancellation.cancelledAt),
+            },
+          },
+        };
+      });
+    } catch (error) {
+      if (error instanceof RpcException) {
+        throw error;
+      }
+
+      this.logError(`Error al anular la venta ${saleId}`, error);
+
+      throw new RpcException({
+        code: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: 'Error al anular la venta.',
+      });
     }
   }
 
@@ -1801,6 +1902,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         personId: true,
         receptionist: true,
         createdAt: true,
+        cancellation: {
+          id: true,
+          reason: true,
+          cancelledByUser: true,
+          cancelledAt: true,
+        },
         saleProducts: {
           id: true,
           name: true,
@@ -1826,6 +1933,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         personId,
       },
       relations: {
+        cancellation: true,
         saleProducts: {
           fileNumbers: true,
         },
@@ -1849,6 +1957,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           ...sale,
           code: this.formatSaleCode(sale.code, sale.createdAt),
           createdAt: this.formatDate(sale.createdAt),
+          cancellation: sale.cancellation
+            ? {
+                ...sale.cancellation,
+                cancelledAt: this.formatDate(sale.cancellation.cancelledAt),
+              }
+            : null,
           voucher: voucher
             ? {
                 ...voucher,
@@ -2881,6 +2995,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         personId: true,
         receptionist: true,
         createdAt: true,
+        cancellation: {
+          id: true,
+          reason: true,
+          cancelledByUser: true,
+          cancelledAt: true,
+        },
         parameter: {
           id: true,
           currencySymbol: true,
@@ -2922,6 +3042,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       },
       where: { id: saleId },
       relations: {
+        cancellation: true,
         parameter: true,
         saleProducts: {
           fileNumbers: true,
@@ -2939,6 +3060,16 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       throw new RpcException({
         code: HttpStatus.NOT_FOUND,
         message: `La venta con el ID ${saleId} no existe.`,
+      });
+    }
+
+    if (sale.saleState !== SaleState.VIGENTE) {
+      throw new RpcException({
+        code: HttpStatus.CONFLICT,
+        message:
+          sale.saleState === SaleState.ANULADO
+            ? 'No se puede generar el recibo porque la venta está anulada.'
+            : `No se puede generar el recibo porque la venta no está VIGENTE. Estado actual: ${sale.saleState}.`,
       });
     }
 
@@ -2973,6 +3104,13 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         personId: sale.personId,
         receptionist: sale.receptionist,
         createdAt: this.formatDate(sale.createdAt),
+        cancellation: sale.cancellation
+          ? {
+              reason: sale.cancellation.reason,
+              cancelledByUser: sale.cancellation.cancelledByUser,
+              cancelledAt: this.formatDate(sale.cancellation.cancelledAt),
+            }
+          : null,
       },
       principalCustomer: {
         fullName: principalCustomer.fullName,
