@@ -16,6 +16,14 @@ import {
 } from 'class-validator';
 import { SaleProductDto } from './create-sale.dto';
 
+export enum BcbQrStatus {
+  PROCESADO = 'PROCESADO',
+  RECHAZADO = 'RECHAZADO',
+  NO_PROCESADO = 'NO PROCESADO',
+}
+
+export const BCB_QR_STATUSES: BcbQrStatus[] = Object.values(BcbQrStatus);
+
 export class BcbQrDataDto {
   @IsString()
   @IsNotEmpty()
@@ -152,8 +160,8 @@ export class BcbPaymentNotificationDto {
   importe?: number;
 
   @IsString()
-  @IsIn(['PROCESADO', 'RECHAZADO', 'NO PROCESADO'])
-  estado: string;
+  @IsIn(BCB_QR_STATUSES)
+  estado: BcbQrStatus;
 
   @IsObject()
   metaData: Record<string, unknown>;

@@ -37,6 +37,7 @@ import {
   AccountLookupDataDto,
   BcbPaymentNotificationDto,
   BcbQrDataDto,
+  BcbQrStatus,
   CollectionState,
   CreateCollectionTransactionDto,
   CreateSaleDto,
@@ -70,8 +71,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     private readonly parameterRepository: Repository<Parameter>,
     @InjectRepository(Sale)
     private readonly salesRepository: Repository<Sale>,
-    @InjectRepository(SaleProduct)
-    private readonly saleProductsRepository: Repository<SaleProduct>,
     @InjectRepository(QrPaymentSale)
     private readonly qrPaymentSaleRepository: Repository<QrPaymentSale>,
     private readonly dataSource: DataSource,
@@ -95,12 +94,15 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
   async searchPerson(value: string, type: string): Promise<any> {
     try {
-      const response: any = await this.nats.firstValue('person.search', {
-        value,
-        type,
-      });
+      const { serviceStatus, data } = await this.nats.firstValue(
+        'person.search',
+        {
+          value,
+          type,
+        },
+      );
 
-      if (!response?.serviceStatus) {
+      if (!serviceStatus) {
         return {
           error: true,
           message: 'Servicio de Beneficiarios no disponible',
@@ -109,9 +111,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       }
 
       return {
-        error: response.error ?? false,
-        message: response.message ?? 'Búsqueda de beneficiarios completada',
-        data: response.data ?? null,
+        error: false,
+        message: 'Búsqueda de beneficiarios completada',
+        data: data ?? null,
       };
     } catch (error) {
       this.logError('Error al buscar beneficiarios', error);
@@ -124,7 +126,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async groups(): Promise<any> {
+  private async groups(): Promise<any> {
     try {
       const groups = await this.groupsRepository.find({
         select: {
@@ -134,14 +136,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           accountId: true,
         },
       });
-
-      if (groups.length === 0) {
-        return {
-          error: false,
-          message: 'Grupos obtenidos correctamente',
-          data: [],
-        };
-      }
 
       const accountIds = [
         ...new Set(
@@ -196,20 +190,16 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const response: any = await this.nats.firstValue(
+      const { serviceStatus, data } = await this.nats.firstValue(
         'accounts.findAllByIds',
         {
           ids: accountIds,
           columns: ['id', 'name', 'accountNumber'],
         },
       );
-      const accounts: AccountLookupDataDto[] = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.data)
-          ? response.data
-          : [];
+      const accounts: AccountLookupDataDto[] = Array.isArray(data) ? data : [];
 
-      if (!response?.serviceStatus || accounts.length === 0) {
+      if (!serviceStatus || accounts.length === 0) {
         this.logger.warn(
           'No se pudo obtener información de las cuentas o el formato de respuesta no fue correcto.',
         );
@@ -295,7 +285,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async parameters(): Promise<any> {
+  private async parameters(): Promise<any> {
     try {
       const activeParameters = await this.parameterRepository.find({
         where: { isActive: true },
@@ -348,7 +338,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async paymentTypes(): Promise<any> {
+  private async paymentTypes(): Promise<any> {
     try {
       const paymentTypes = await this.paymentTypesRepository.find({
         select: {
@@ -376,9 +366,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
   async accounts(): Promise<any> {
     try {
-      const response: any = await this.nats.firstValue('accounts.findAll', {});
+      const { serviceStatus, data } = await this.nats.firstValue(
+        'accounts.findAll',
+        {},
+      );
 
-      if (!response?.serviceStatus) {
+      if (!serviceStatus) {
         return {
           error: true,
           message: 'Servicio de cuentas no disponible',
@@ -387,9 +380,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       }
 
       return {
-        error: response.error ?? false,
-        message: response.message ?? 'Cuentas obtenidas correctamente',
-        data: response.data ?? null,
+        error: false,
+        message: 'Cuentas obtenidas correctamente',
+        data: data ?? null,
       };
     } catch (error) {
       this.logError('Error al obtener cuentas', error);
@@ -402,54 +395,8 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async dataForSale(): Promise<any> {
+  private async personDetails(personUuid: string): Promise<any> {
     try {
-      const [paymentTypesResult] = await Promise.all([this.paymentTypes()]);
-
-      const error = paymentTypesResult.error;
-
-      if (error) {
-        const messages = [
-          paymentTypesResult.error ? paymentTypesResult.message : null,
-        ]
-          .filter(Boolean)
-          .join('; ');
-
-        return {
-          error: true,
-          message: `Error al obtener datos para la venta: ${messages}`,
-          data: null,
-        };
-      }
-
-      return {
-        error: false,
-        message: 'Datos para la venta obtenidos correctamente',
-        data: {
-          paymentTypes: paymentTypesResult.data,
-        },
-      };
-    } catch (error) {
-      this.logError('Error al obtener datos para la venta', error);
-
-      return {
-        error: true,
-        message: 'Error al obtener datos para la venta',
-        data: null,
-      };
-    }
-  }
-
-  async personDetails(personUuid: string): Promise<any> {
-    try {
-      if (!personUuid) {
-        return {
-          error: true,
-          message: 'Seleccione una persona para crear la venta.',
-          data: null,
-        };
-      }
-
       return this.fetchPersonForCreatingSale(
         'person.findOneWithFeatures',
         { uuid: personUuid },
@@ -468,14 +415,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
   private async personDetailsById(personId: number): Promise<any> {
     try {
-      if (!Number.isInteger(personId) || personId <= 0) {
-        return {
-          error: true,
-          message: 'Seleccione una persona para crear la venta.',
-          data: null,
-        };
-      }
-
       return this.fetchPersonForCreatingSale('person.findForCreatingSaleById', {
         id: personId,
       });
@@ -495,9 +434,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     payload: any,
     uuidColumn?: string,
   ): Promise<any> {
-    const personResponse: any = await this.nats.firstValue(pattern, payload);
+    const { serviceStatus, data } = await this.nats.firstValue(
+      pattern,
+      payload,
+    );
 
-    if (!personResponse?.serviceStatus) {
+    if (!serviceStatus) {
       return {
         error: true,
         message:
@@ -506,17 +448,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    if (personResponse.error) {
-      return {
-        error: true,
-        message:
-          personResponse.message ??
-          'No se pudo validar la persona seleccionada.',
-        data: null,
-      };
-    }
-
-    const person: any = personResponse.data ?? personResponse;
+    const person = data;
 
     return {
       error: false,
@@ -566,19 +498,16 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           this.parameters(),
           this.paymentTypes(),
         ]);
+      const failedResults = [
+        personResult,
+        groupsResult,
+        parametersResult,
+        paymentTypesResult,
+      ].filter((result) => result.error);
 
-      if (
-        personResult.error ||
-        groupsResult.error ||
-        parametersResult.error ||
-        paymentTypesResult.error
-      ) {
-        const messages = [
-          personResult.error ? personResult.message : null,
-          groupsResult.error ? groupsResult.message : null,
-          parametersResult.error ? parametersResult.message : null,
-          paymentTypesResult.error ? paymentTypesResult.message : null,
-        ]
+      if (failedResults.length > 0) {
+        const messages = failedResults
+          .map((result) => result.message)
           .filter(Boolean)
           .join('; ');
 
@@ -620,7 +549,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         return saleContext;
       }
 
-      if (!this.isQrPaymentType(saleContext.paymentType)) {
+      if (!saleContext.isQrPayment) {
         return {
           error: true,
           message: 'El tipo de pago seleccionado no corresponde a QR.',
@@ -633,15 +562,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         saleContext.saleTotal,
         saleContext.normalizedProducts,
       );
-      const qrDataErrors = this.validateBcbQrData(qrData);
-
-      if (qrDataErrors.length > 0) {
-        return {
-          error: true,
-          message: `Datos QR incompletos: ${qrDataErrors.join(', ')}`,
-          data: null,
-        };
-      }
 
       const generatedQr = await this.generateBcbQr(
         this.buildBcbQrPayload(
@@ -666,7 +586,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
             receptionist: saleContext.receptionist,
             paymentTypeId: saleContext.paymentTypeId,
             parameterId: saleContext.parameterId,
-            saleProducts: this.mapInputSaleProducts(payload.saleProducts),
+            saleProducts: payload.saleProducts,
             total: saleContext.saleTotal,
             currency: qrData.codMoneda,
             accountNumber: qrData.accountNumber,
@@ -715,20 +635,11 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         return saleContext;
       }
 
-      if (this.isQrPaymentType(saleContext.paymentType)) {
+      if (saleContext.isQrPayment) {
         return {
           error: true,
           message:
             'Las ventas con QR se crean automáticamente cuando BCB notifica el pago.',
-          data: null,
-        };
-      }
-
-      if (!this.isManualPaymentType(saleContext.paymentType)) {
-        return {
-          error: true,
-          message:
-            'El tipo de pago seleccionado no está habilitado para crear ventas manuales.',
           data: null,
         };
       }
@@ -774,12 +685,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         ...transactionData,
         accountNumber: resolvedAccountNumber,
       };
-      const response: any = await this.nats.firstValue(
+      const { serviceStatus, data } = await this.nats.firstValue(
         'collections.add',
         transaction,
       );
 
-      if (!response?.serviceStatus) {
+      if (!serviceStatus) {
         return {
           error: true,
           message:
@@ -788,16 +699,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         };
       }
 
-      if (response.error) {
-        return {
-          error: true,
-          message:
-            response.message ?? 'Collections no pudo registrar la cobranza.',
-          transactionId: null,
-        };
-      }
-
-      const transactionId = String(response.data?.id ?? '').trim();
+      const transactionId = String(data?.id ?? '').trim();
 
       if (!transactionId) {
         return {
@@ -810,9 +712,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
       return {
         error: false,
-        message:
-          response.message ??
-          'Transacción de cobranza registrada correctamente',
+        message: 'Transacción de cobranza registrada correctamente',
         transactionId,
         accountNumber: resolvedAccountNumber,
       };
@@ -844,14 +744,17 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const response: any = await this.nats.firstValue('accounts.findAllByIds', {
-      ids: accountIds,
-      columns: ['id', 'accountNumber'],
-    });
-    const accounts = Array.isArray(response?.data) ? response.data : [];
+    const { serviceStatus, data } = await this.nats.firstValue(
+      'accounts.findAllByIds',
+      {
+        ids: accountIds,
+        columns: ['id', 'accountNumber'],
+      },
+    );
+    const accounts = Array.isArray(data) ? data : [];
     const accountNumber = String(accounts[0]?.accountNumber ?? '').trim();
 
-    if (!response?.serviceStatus || !accountNumber) {
+    if (!serviceStatus || !accountNumber) {
       throw new Error(
         'No se pudo obtener el número de cuenta para registrar la cobranza.',
       );
@@ -1009,9 +912,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         savedQrPayment = await manager.save(QrPaymentSale, qrPayment);
       }
 
-      const storedQrData = qrPayment
-        ? this.getStoredQrData(qrPayment)
-        : undefined;
+      const storedQrData = qrPayment?.dataResponse;
       const destinationAccountNumber = String(
         storedQrData?.accountNumber ?? '',
       ).trim();
@@ -1045,7 +946,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
       if (qrPayment) {
         qrPayment.dataResponse = {
-          ...this.getStoredQrData(qrPayment),
+          ...qrPayment.dataResponse,
           accountNumber: collectionResult.accountNumber,
           saleId: sale.id,
         };
@@ -1261,7 +1162,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         receptionist: saleContext.receptionist,
         paymentTypeId: saleContext.paymentTypeId,
         parameterId: saleContext.parameterId,
-        saleProducts: this.mapInputSaleProducts(payload.saleProducts),
+        saleProducts: payload.saleProducts,
       },
       sales: {
         id: createdSale.sale.id,
@@ -1417,7 +1318,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       idQR: qrId,
       eif: String(processedOrder.eif ?? 'BCB_STATUS_QUERY'),
       codMoneda: String(processedOrder.codMoneda ?? ''),
-      estado: 'PROCESADO',
+      estado: BcbQrStatus.PROCESADO,
       metaData: processedOrder.metaData ?? response.datos?.metaData ?? {},
     });
   }
@@ -1455,7 +1356,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   ): Promise<any> {
     try {
       const qrId = notification.idQR;
-      
+
       const qrPayment = await this.qrPaymentSaleRepository.findOne({
         where: { qrId },
       });
@@ -1489,9 +1390,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         };
       }
 
-      const notifiedStatus = String(notification?.estado ?? '').trim();
-      const qrStatus =
-        this.resolveQrPaymentStatusFromBcbNotification(notifiedStatus);
+      const qrStatus = this.resolveQrPaymentStatusFromBcbNotification(
+        notification.estado,
+      );
 
       if (qrStatus !== QrPaymentStatus.PAGADO) {
         return this.processNonPaidQrNotification(
@@ -1674,18 +1575,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     qrPayment: QrPaymentSale,
     notification: BcbPaymentNotificationDto,
   ): Promise<any> {
-    const salePayload = this.buildSalePayloadFromQrPayment(qrPayment);
-
-    if (!salePayload) {
-      const data = { qrId: qrPayment.qrId, notification };
-
-      return {
-        error: true,
-        message:
-          'El QR no tiene los datos originales necesarios para crear la venta.',
-        data,
-      };
-    }
+    const salePayload = qrPayment.dataResponse as unknown as GenerateQrDto;
 
     const saleContext = await this.validateSaleInput(salePayload);
 
@@ -1703,7 +1593,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    if (!this.isQrPaymentType(saleContext.paymentType)) {
+    if (!saleContext.isQrPayment) {
       const data = { qrId: qrPayment.qrId, notification };
 
       return {
@@ -1714,7 +1604,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
 
     const depositDate = new Date();
-    const storedQrData = this.getStoredQrData(qrPayment);
+    const storedQrData = qrPayment.dataResponse;
     const storedQrGlosa =
       typeof storedQrData.glosa === 'string' ? storedQrData.glosa.trim() : '';
     const qrGlosa =
@@ -1726,19 +1616,21 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       );
 
     const originEif = String(notification.eifOrigen ?? '').trim();
-    const financialEntityResponse: any = originEif
-      ? await this.nats.firstValue('financialEntities.searchByColumn', {
+    let financialEntityName = '';
+
+    if (originEif) {
+      const { serviceStatus, data } = await this.nats.firstValue(
+        'financialEntities.searchByColumn',
+        {
           columns: ['name'],
           filterColumn: 'eif',
           value: originEif,
-        })
-      : null;
-    const financialEntityName =
-      financialEntityResponse?.serviceStatus &&
-      financialEntityResponse?.error !== true &&
-      typeof financialEntityResponse?.data?.name === 'string'
-        ? financialEntityResponse.data.name.trim()
-        : '';
+        },
+      );
+      if (serviceStatus && typeof data?.name === 'string') {
+        financialEntityName = data.name.trim();
+      }
+    }
 
     const createdSale = await this.createSaleRecords({
       saleContext,
@@ -1918,31 +1810,36 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     expirationDateQr: Date,
   ): Promise<void> {
     const ttlMs = Math.max(expirationDateQr.getTime() - Date.now(), 1);
-    const response: any = await this.nats.firstValue('ftp.saveDataTmp', {
-      ...this.buildQrTemporaryFilePayload(qrId),
-      data: { qrImage },
-      ttlMs,
-    });
+    const { serviceStatus, data } = await this.nats.firstValue(
+      'ftp.saveDataTmp',
+      {
+        ...this.buildQrTemporaryFilePayload(qrId),
+        data: { qrImage },
+        ttlMs,
+      },
+    );
 
-    if (!response?.serviceStatus || response?.statusSaved !== true) {
+    if (!serviceStatus || data?.statusSaved !== true) {
       throw new Error('No se pudo guardar la imagen QR temporal.');
     }
   }
 
   public async getTemporaryQrImage(qrId: string): Promise<string | null> {
     try {
-      const response: any = await this.nats.firstValue(
+      const { serviceStatus, data } = await this.nats.firstValue(
         'ftp.getDataTmp',
         this.buildQrTemporaryFilePayload(qrId),
       );
 
-      if (!response?.serviceStatus) {
+      if (!serviceStatus) {
         return null;
       }
 
-      const qrImage = response.qrImage;
+      const temporaryQrImage = data?.qrImage;
 
-      return typeof qrImage === 'string' && qrImage.length > 0 ? qrImage : null;
+      return typeof temporaryQrImage === 'string' && temporaryQrImage.length > 0
+        ? temporaryQrImage
+        : null;
     } catch (error) {
       this.logError(
         `Error al recuperar la imagen temporal del QR ${qrId}`,
@@ -1954,12 +1851,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
   private async removeTemporaryQrImage(qrId: string): Promise<void> {
     try {
-      const response: any = await this.nats.firstValue(
+      const { serviceStatus, data } = await this.nats.firstValue(
         'ftp.removeDataTmp',
         this.buildQrTemporaryFilePayload(qrId),
       );
 
-      if (!response?.serviceStatus || response?.statusRemoved !== true) {
+      if (!serviceStatus || data?.statusRemoved !== true) {
         this.logger.warn(`No se pudo eliminar la imagen QR temporal ${qrId}`);
       }
     } catch (error) {
@@ -2026,14 +1923,14 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private resolveQrPaymentStatusFromBcbNotification(
-    status: string,
+    status: BcbQrStatus,
   ): QrPaymentStatus {
     switch (status) {
-      case 'PROCESADO':
+      case BcbQrStatus.PROCESADO:
         return QrPaymentStatus.PAGADO;
-      case 'RECHAZADO':
+      case BcbQrStatus.RECHAZADO:
         return QrPaymentStatus.RECHAZADO;
-      default:
+      case BcbQrStatus.NO_PROCESADO:
         return QrPaymentStatus.PENDIENTE;
     }
   }
@@ -2043,7 +1940,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     notification: BcbPaymentNotificationDto,
   ): string[] {
     const errors: string[] = [];
-    const storedData = this.getStoredQrData(qrPayment);
+    const storedData = qrPayment.dataResponse;
     const expectedAmount = this.resolveStoredQrAmount(storedData);
     const receivedAmount = Number(notification?.importe);
     const expectedCurrency = String(storedData.currency ?? 'BOB').toUpperCase();
@@ -2127,7 +2024,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     qrPayment: QrPaymentSale,
     notification: BcbPaymentNotificationDto | null,
   ): Record<string, unknown> {
-    const storedData = this.getStoredQrData(qrPayment);
+    const storedData = qrPayment.dataResponse;
 
     const data = {
       total: storedData.total,
@@ -2165,148 +2062,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     return data;
   }
 
-  private buildSalePayloadFromQrPayment(
-    qrPayment: QrPaymentSale,
-  ): GenerateQrDto | null {
-    const storedData = this.getStoredQrData(qrPayment);
-
-    const personId = Number(storedData?.personId);
-    const receptionist =
-      typeof storedData?.receptionist === 'string'
-        ? storedData.receptionist.trim()
-        : '';
-    const paymentTypeId = Number(storedData?.paymentTypeId);
-    const parameterId = Number(storedData?.parameterId);
-    const saleProducts = this.parseStoredQrSaleProducts(
-      storedData.saleProducts,
-    );
-
-    if (
-      !Number.isInteger(personId) ||
-      personId <= 0 ||
-      !receptionist ||
-      !Number.isInteger(paymentTypeId) ||
-      paymentTypeId <= 0 ||
-      !Number.isInteger(parameterId) ||
-      parameterId <= 0 ||
-      !saleProducts
-    ) {
-      return null;
-    }
-
-    return {
-      personId,
-      receptionist,
-      paymentTypeId,
-      parameterId,
-      saleProducts,
-    };
-  }
-
-  private parseStoredQrSaleProducts(
-    value: unknown,
-  ): GenerateQrDto['saleProducts'] | null {
-    if (!Array.isArray(value) || value.length === 0) {
-      return null;
-    }
-
-    const hasInvalidProduct = value.some((item) => {
-      if (!this.isRecord(item)) {
-        return true;
-      }
-
-      return (
-        !Number.isInteger(item.productId) ||
-        Number(item.productId) <= 0 ||
-        typeof item.name !== 'string' ||
-        !item.name.trim() ||
-        typeof item.code !== 'string' ||
-        !item.code.trim() ||
-        typeof item.price !== 'string' ||
-        !Number.isFinite(Number(item.price)) ||
-        !Number.isInteger(item.amount) ||
-        Number(item.amount) <= 0
-      );
-    });
-
-    if (hasInvalidProduct) {
-      return null;
-    }
-
-    return value.map((item) => {
-      const product: any = item;
-
-      return {
-        productId: Number(product.productId),
-        name: String(product.name),
-        code: String(product.code),
-        price: String(product.price),
-        amount: Number(product.amount),
-      };
-    });
-  }
-
-  private getStoredQrData(qrPayment: QrPaymentSale): any {
-    return this.isRecord(qrPayment.dataResponse) ? qrPayment.dataResponse : {};
-  }
-
-  private isQrPaymentType(
-    paymentType: PaymentType | null | undefined,
-  ): boolean {
-    return paymentType?.shortened?.toUpperCase() === 'QR';
-  }
-
-  private isManualPaymentType(
-    paymentType: PaymentType | null | undefined,
-  ): boolean {
-    return ['EF', 'DEP', 'TRANSF'].includes(
-      paymentType?.shortened?.toUpperCase() ?? '',
-    );
-  }
-
-  private mapInputSaleProducts(
-    saleProducts: CreateSaleDto['saleProducts'] | GenerateQrDto['saleProducts'],
-  ): {
-    productId: number;
-    name: string;
-    code: string;
-    price: string;
-    amount: number;
-  }[] {
-    return saleProducts.map((saleProduct) => ({
-      productId: Number(saleProduct.productId),
-      name: saleProduct.name,
-      code: saleProduct.code,
-      price: saleProduct.price,
-      amount: saleProduct.amount,
-    }));
-  }
-
   private buildSaleInputValidationError(message: string): any {
     return {
       error: true,
       message,
       data: null,
     };
-  }
-
-  private normalizeSaleProducts(
-    saleProducts: CreateSaleDto['saleProducts'] | GenerateQrDto['saleProducts'],
-  ): NormalizedSaleProductDto[] {
-    return saleProducts.map((item) => {
-      const productId = item.productId;
-      const amount = item.amount;
-      const price = Number(item?.price);
-
-      return {
-        productId,
-        name: item.name.trim(),
-        code: item.code.trim(),
-        price,
-        amount,
-        total: Number((price * amount).toFixed(2)),
-      };
-    });
   }
 
   private findCatalogProductMismatch(
@@ -2343,7 +2104,18 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const normalizedProducts = this.normalizeSaleProducts(data.saleProducts);
+    const normalizedProducts: NormalizedSaleProductDto[] =
+      data.saleProducts.map((item) => {
+        const price = Number(item.price);
+
+        return {
+          ...item,
+          name: item.name.trim(),
+          code: item.code.trim(),
+          price,
+          total: Number((price * item.amount).toFixed(2)),
+        };
+      });
 
     const productIds = normalizedProducts.map((item) => item.productId);
     const uniqueProductIds = [...new Set(productIds)];
@@ -2448,6 +2220,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       normalizedProducts,
       parameter,
       paymentType,
+      isQrPayment: paymentType.shortened.toUpperCase() === 'QR',
       products,
       productsById,
       person: personResult.data,
@@ -2481,18 +2254,16 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const response: any = await this.nats.firstValue(
+    const { serviceStatus, data } = await this.nats.firstValue(
       'accounts.findAllData',
       {},
     );
 
-    if (!response?.serviceStatus || response?.error) {
-      throw new Error(
-        response?.message ?? 'No se pudieron obtener las cuentas destino.',
-      );
+    if (!serviceStatus) {
+      throw new Error('Servicio de cuentas no disponible.');
     }
 
-    const accounts = Array.isArray(response?.data) ? response.data : [];
+    const accounts = Array.isArray(data) ? data : [];
     const account = accounts.find((item: any) => item?.id === accountIds[0]);
 
     if (!account) {
@@ -2519,6 +2290,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     const ciNitDestinatario =
       bcbAccount.ciNitDestinatario || String(account.ciNitTitular ?? '').trim();
     const fechaVencimiento = this.formatDate(this.buildDefaultQrExpiration());
+
+    if (!titularDestinatario || !ciNitDestinatario) {
+      throw new Error(
+        'La cuenta destino no tiene titular o documento configurado para generar el QR.',
+      );
+    }
 
     return {
       destinationAccount: String(account.name ?? '').trim(),
@@ -2567,24 +2344,18 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const response: any = await this.nats.firstValue('bcb.entities', {});
+    const { serviceStatus, data } = await this.nats.firstValue(
+      'bcb.entities',
+      {},
+    );
 
-    if (
-      !response?.serviceStatus ||
-      response?.error === true ||
-      response?.finalizado === false
-    ) {
+    if (!serviceStatus) {
       throw new Error(
-        this.getRemoteMessage(
-          response,
-          'No se pudieron consultar las cuentas BCB de la entidad.',
-        ),
+        'Servicio BCB no disponible para consultar las cuentas de la entidad.',
       );
     }
 
-    const bcbAccounts = Array.isArray(response.datos?.cuentas)
-      ? response.datos.cuentas
-      : [];
+    const bcbAccounts = Array.isArray(data?.cuentas) ? data.cuentas : [];
     const bcbAccount = bcbAccounts.find(
       (item: any) =>
         String(item?.eif ?? '').trim() === eif &&
@@ -2625,31 +2396,30 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getBcbQrStatus(qrId: string): Promise<any> {
-    const response: any = await this.nats.firstValue('bcb.qrStatus', {
+    const { serviceStatus, data } = await this.nats.firstValue('bcb.qrStatus', {
       qrId,
     });
 
-    if (!response?.serviceStatus) {
+    if (!serviceStatus) {
       throw new Error(
-        response?.message ??
-          'Servicio BCB no disponible para consultar el estado del QR',
+        'Servicio BCB no disponible para consultar el estado del QR',
       );
     }
 
-    if (response?.error === true || response?.finalizado === false) {
+    if (data?.error === true || data?.finalizado === false) {
       throw new Error(
-        this.getRemoteMessage(response, 'BCB no finalizó la consulta del QR'),
+        data?.message ?? data?.mensaje ?? 'BCB no finalizó la consulta del QR',
       );
     }
 
     if (
-      typeof response.statusValidation?.isPaid !== 'boolean' ||
-      typeof response.statusValidation?.isRejected !== 'boolean'
+      typeof data?.statusValidation?.isPaid !== 'boolean' ||
+      typeof data?.statusValidation?.isRejected !== 'boolean'
     ) {
       throw new Error('BCB devolvió un estado de QR incompleto o inválido');
     }
 
-    return response;
+    return data;
   }
 
   private resolveQrPaymentStatus(
@@ -2700,37 +2470,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     ].join(' ');
   }
 
-  private validateBcbQrData(qrData?: BcbQrDataDto): string[] {
-    if (!qrData) {
-      return ['qrData'];
-    }
-
-    const errors: string[] = [];
-    const requiredStringFields: Array<keyof BcbQrDataDto> = [
-      'titularDestinatario',
-      'ciNitDestinatario',
-      'eif',
-      'cuentaDestino',
-      'codMoneda',
-      'fechaVencimiento',
-      'codigoServicio',
-    ];
-
-    requiredStringFields.forEach((field) => {
-      const value = qrData[field];
-
-      if (typeof value !== 'string' || value.trim().length === 0) {
-        errors.push(field);
-      }
-    });
-
-    if (typeof qrData.unicoUso !== 'boolean') {
-      errors.push('unicoUso');
-    }
-
-    return errors;
-  }
-
   private buildBcbQrPayload(
     qrData: BcbQrDataDto,
     sale: { id?: number | null; personId: number },
@@ -2777,25 +2516,26 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async generateBcbQr(payload: any): Promise<any> {
-    const response: any = await this.nats.firstValue('bcb.generateQr', payload);
+    const { serviceStatus, data } = await this.nats.firstValue(
+      'bcb.generateQr',
+      payload,
+    );
 
-    if (!response?.serviceStatus) {
+    if (!serviceStatus) {
+      throw new Error('Servicio BCB no disponible para generar QR');
+    }
+
+    if (data?.error === true || data?.finalizado === false) {
       throw new Error(
-        response?.message ?? 'Servicio BCB no disponible para generar QR',
+        data?.message ?? data?.mensaje ?? 'BCB no finalizó la generación QR',
       );
     }
 
-    if (response?.error === true || response?.finalizado === false) {
-      throw new Error(
-        this.getRemoteMessage(response, 'BCB no finalizó la generación QR'),
-      );
-    }
-
-    if (!response.datos?.idQr || !response.datos?.imagenQr) {
+    if (!data?.datos?.idQr || !data?.datos?.imagenQr) {
       throw new Error('BCB no devolvió idQr o imagenQr');
     }
 
-    return response;
+    return data;
   }
 
   private extractDepositDateFromQrStatus(response: any): Date | null {
@@ -2815,28 +2555,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       ? response.datos.ordenes
       : [];
 
-    return orders.find((order) => order.estado === 'PROCESADO') ?? null;
-  }
-
-  private isRecord(value: any): boolean {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-  }
-
-  private toRecord(value: any): any {
-    return this.isRecord(value) ? value : {};
-  }
-
-  private getRemoteMessage(response: any, fallbackMessage: string): string {
-    const responseData = this.toRecord(response.data);
-    const message =
-      response.message ??
-      response.mensaje ??
-      responseData.message ??
-      responseData.mensaje;
-
-    return typeof message === 'string' && message.trim()
-      ? message.trim()
-      : fallbackMessage;
+    return (
+      orders.find((order) => order.estado === BcbQrStatus.PROCESADO) ?? null
+    );
   }
 
   private logError(context: string, error: unknown): void {
@@ -3179,10 +2900,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           .map((product) => product.name)
           .filter(Boolean)
           .join(' / '),
-        amount: products.reduce(
-          (total, product) => total + product.amount,
-          0,
-        ),
+        amount: products.reduce((total, product) => total + product.amount, 0),
         price: prices.join(' / '),
         products,
         paymentType: voucher?.paymentType?.name ?? '',
@@ -3265,18 +2983,6 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   } {
     const from = this.parseReportDate(dateFrom, 'start');
     const to = this.parseReportDate(dateTo, 'end');
-
-    if (dateFrom && !from) {
-      throw new BadRequestException(
-        `dateFrom "${dateFrom}" no es una fecha válida.`,
-      );
-    }
-
-    if (dateTo && !to) {
-      throw new BadRequestException(
-        `dateTo "${dateTo}" no es una fecha válida.`,
-      );
-    }
 
     if (from && to && from.getTime() > to.getTime()) {
       throw new BadRequestException(

@@ -13,6 +13,13 @@ import { SalesService } from './sales.service';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @MessagePattern('sales.searchPerson')
+  async searchPerson(
+    @Payload('value') value: string,
+    @Payload('type') type: string,
+  ) {
+    return this.salesService.searchPerson(value, type);
+  }
 
   @MessagePattern('sales.groupProducts')
   async productsGroup(@Payload('groupId') groupId: number) {
@@ -77,7 +84,9 @@ export class SalesController {
   }
 
   @MessagePattern('sales.personSalesRecords')
-  async getPersonSalesRecords(@Payload('personId', ParseIntPipe) personId: number) {
+  async getPersonSalesRecords(
+    @Payload('personId', ParseIntPipe) personId: number,
+  ) {
     return this.salesService.getPersonSalesRecords(personId);
   }
 }
