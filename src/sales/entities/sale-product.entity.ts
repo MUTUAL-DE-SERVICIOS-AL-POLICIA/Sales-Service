@@ -7,7 +7,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  OneToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
@@ -55,7 +55,6 @@ export class SaleProduct {
   @Column({ name: 'total', type: 'decimal', precision: 10, scale: 2 })
   total: number;
 
-  // Snapshot histórico de la regla aplicada al crear la venta.
   @Column({ name: 'requires_file_number', type: 'boolean' })
   requiresFileNumber: boolean;
 
@@ -68,9 +67,9 @@ export class SaleProduct {
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 
-  @OneToMany(
+  @OneToOne(
     () => SaleProductFileNumber,
     (fileNumber) => fileNumber.saleProduct,
   )
-  fileNumbers: SaleProductFileNumber[];
+  fileNumber: SaleProductFileNumber;
 }

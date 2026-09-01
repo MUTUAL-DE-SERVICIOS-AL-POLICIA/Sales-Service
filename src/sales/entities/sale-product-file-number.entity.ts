@@ -6,7 +6,7 @@ import {
   Entity,
   Index,
   JoinColumn,
-  ManyToOne,
+  OneToOne,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
@@ -39,10 +39,10 @@ export class SaleProductFileNumber {
   @Column({ name: 'sale_product_id', type: 'int' })
   saleProductId: number;
 
-  @ManyToOne(() => SaleProduct, (saleProduct) => saleProduct.fileNumbers, {
-    nullable: false,
-    onDelete: 'NO ACTION',
-  })
+  @OneToOne(() => SaleProduct, (saleProduct) => saleProduct.fileNumber, {
+  nullable: false,
+  onDelete: 'NO ACTION',
+})
   @JoinColumn([
     {
       name: 'sale_product_id',

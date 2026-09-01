@@ -1,6 +1,6 @@
 export enum CollectionState {
-  COINCILIADO = 'COINCILIADO',
-  NO_COINCILIADO = 'NO COINCILIADO',
+  CONCILIADO = 'CONCILIADO',
+  NO_CONCILIADO = 'NO CONCILIADO',
 }
 
 export interface CreateCollectionTransactionDto {

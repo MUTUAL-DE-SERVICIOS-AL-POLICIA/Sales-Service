@@ -26,6 +26,11 @@ export class SalesController {
     return this.salesService.productsGroup(groupId);
   }
 
+  @MessagePattern('sales.groupsCheck')
+  async groupsCheck(@Payload('groupIds') groupIds: string) {
+    return this.salesService.groupsCheck(groupIds);
+  }
+
   @MessagePattern('sales.accounts')
   async accounts() {
     return this.salesService.accounts();
@@ -78,9 +83,9 @@ export class SalesController {
     return this.salesService.voucherPdf(saleId);
   }
 
-  @MessagePattern('sales.list')
-  async salesList(@Payload() filters: SalesListDto) {
-    return this.salesService.salesList(filters);
+  @MessagePattern('sales.reportAllSales')
+  async reportAllSales(@Payload() filters: SalesListDto) {
+    return this.salesService.reportAllSales(filters);
   }
 
   @MessagePattern('sales.personSalesRecords')
@@ -88,5 +93,15 @@ export class SalesController {
     @Payload('personId', ParseIntPipe) personId: number,
   ) {
     return this.salesService.getPersonSalesRecords(personId);
+  }
+
+  @MessagePattern('sales.forGenerateReport')
+  async forGenerateReport() {
+    return this.salesService.forGenerateReport();
+  }
+
+  @MessagePattern('sales.cancelSale')
+  async cancelSale(@Payload('saleId') saleId: string) {
+    return this.salesService.cancelSale(saleId);
   }
 }

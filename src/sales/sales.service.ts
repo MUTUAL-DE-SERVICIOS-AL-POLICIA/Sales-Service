@@ -93,37 +93,27 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async searchPerson(value: string, type: string): Promise<any> {
-    try {
-      const { serviceStatus, data } = await this.nats.firstValue(
-        'person.search',
-        {
-          value,
-          type,
-        },
-      );
+    const { serviceStatus, data } = await this.nats.firstValue(
+      'person.search',
+      {
+        value,
+        type,
+      },
+    );
 
-      if (!serviceStatus) {
-        return {
-          error: true,
-          message: 'Servicio de Beneficiarios no disponible',
-          data: null,
-        };
-      }
-
-      return {
-        error: false,
-        message: 'Búsqueda de beneficiarios completada',
-        data: data ?? null,
-      };
-    } catch (error) {
-      this.logError('Error al buscar beneficiarios', error);
-
+    if (!serviceStatus) {
       return {
         error: true,
         message: 'Servicio de Beneficiarios no disponible',
         data: null,
       };
     }
+
+    return {
+      error: data.error,
+      message: data.message,
+      data: data,
+    };
   }
 
   private async groups(): Promise<any> {
@@ -145,7 +135,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         ),
       ];
 
-      const accountMap = await this.getAccountLookupMap(accountIds);
+      const accountMap = await this.getAccountLookupMap(accountIds as number[]);
 
       const enrichedGroups: GroupDataDto[] = groups.map((group) => {
         const account = accountMap.get(group.accountId);
@@ -283,6 +273,46 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         data: null,
       };
     }
+  }
+
+  async groupsCheck(groupIds: string): Promise<any> {
+
+    const ids = groupIds
+      .split(',')
+      .map(Number)
+      .filter(Number.isInteger);
+
+    if (!ids.length) {
+      return {
+        error: true,
+        message: 'No se proporcionaron grupos',
+        data: [],
+      };
+    }
+
+    const data = await this.productsRepository.find({
+      where: {
+        group: In(ids),
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!data.length) {
+      return {
+        error: true,
+        message: 'No se encontraron productos con los grupos proporcionados',
+        data: [],
+      };
+    }
+
+    return {
+      error: false,
+      message: 'Productos obtenidos correctamente',
+      data,
+    };
   }
 
   private async parameters(): Promise<any> {
@@ -686,7 +716,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         accountNumber: resolvedAccountNumber,
       };
       const { serviceStatus, data } = await this.nats.firstValue(
-        'collections.add',
+        'collections.createTransaction',
         transaction,
       );
 
@@ -927,11 +957,11 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           titularName,
           payerName,
           description: collectionDescription?.trim(),
-          origin: 'SALES',
+          origin: 'sales',
           paymentType: saleContext.paymentType.name,
           receptionistUser: saleContext.receptionist,
           total: saleContext.saleTotal,
-          state: CollectionState.NO_COINCILIADO,
+          state: CollectionState.NO_CONCILIADO,
         },
         saleContext.products,
         destinationAccountNumber,
@@ -1689,7 +1719,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           id: true,
           name: true,
           amount: true,
-          fileNumbers: {
+          fileNumber: {
             id: true,
             fileNumber: true,
           },
@@ -1711,7 +1741,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       },
       relations: {
         saleProducts: {
-          fileNumbers: true,
+          fileNumber: true,
         },
         voucher: {
           paymentType: true,
@@ -2185,7 +2215,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
 
     const productMismatch = this.findCatalogProductMismatch(
       normalizedProducts,
-      productsById,
+      productsById as Map<number, Product>,
     );
 
     if (productMismatch) {
@@ -2604,7 +2634,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           amount: true,
           price: true,
           total: true,
-          fileNumbers: {
+          fileNumber: {
             id: true,
             fileNumber: true,
           },
@@ -2637,7 +2667,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       relations: {
         parameter: true,
         saleProducts: {
-          fileNumbers: true,
+          fileNumber: true,
           product: {
             group: true,
           },
@@ -2722,9 +2752,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         symbol: sale.parameter?.currencySymbol ?? null,
       },
       products: products.map((product) => {
-        const fileNumbers = (product.fileNumbers ?? []).map(
-          (fileNumber) => fileNumber.fileNumber,
-        );
+        const fileNumbers = product.fileNumber;
 
         return {
           productId: product.product.id,
@@ -2758,188 +2786,17 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async salesList(filters: SalesListDto = {}): Promise<any> {
-    try {
-      return await this.buildSalesListResponse(filters);
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
+  async reportAllSales(filters: SalesListDto = {}): Promise<any> {
 
-      this.logError('Error al obtener el listado de ventas', error);
+    console.log(filters);
 
-      return {
-        error: true,
-        message: 'Error al obtener el listado de ventas.',
-        data: null,
-      };
-    }
-  }
-
-  private async buildSalesListResponse(filters: SalesListDto): Promise<any> {
-    const page = filters.page ?? 1;
-    const hasLimit = filters.limit !== undefined && filters.limit !== null;
-    const normalizedLimit = filters.limit ?? 0;
-    const dateRange = this.validateSalesListDateRange(
-      filters.dateFrom,
-      filters.dateTo,
-    );
-
-    const voucherCreatedAt = this.buildVoucherCreatedAtFindOperator(
-      dateRange.from,
-      dateRange.to,
-    );
-    const where = {
-      saleState: SaleState.VIGENTE,
-      ...(voucherCreatedAt
-        ? {
-            voucher: {
-              createdAt: voucherCreatedAt,
-            },
-          }
-        : {}),
-    };
-
-    const [sales, totalItems] = await Promise.all([
-      this.salesRepository.find({
-        select: {
-          id: true,
-          code: true,
-          createdAt: true,
-          saleState: true,
-          personId: true,
-          receptionist: true,
-          parameter: {
-            id: true,
-            currencySymbol: true,
-          },
-          voucher: {
-            id: true,
-            createdAt: true,
-            total: true,
-            paymentType: {
-              id: true,
-              name: true,
-            },
-          },
-          saleProducts: {
-            id: true,
-            name: true,
-            amount: true,
-            price: true,
-          },
-        },
-        where,
-        relations: {
-          parameter: true,
-          voucher: {
-            paymentType: true,
-          },
-          saleProducts: true,
-        },
-        order: {
-          voucher: {
-            createdAt: 'ASC',
-          },
-          id: 'DESC',
-          saleProducts: {
-            id: 'ASC',
-          },
-        },
-        ...(hasLimit
-          ? {
-              skip: (page - 1) * normalizedLimit,
-              take: normalizedLimit,
-            }
-          : {}),
-      }),
-      this.salesRepository.count({ where }),
-    ]);
-
-    const personIds = [
-      ...new Set(
-        sales
-          .map((sale) => sale.personId)
-          .filter((personId) => Number.isInteger(Number(personId))),
-      ),
-    ];
-    const people = await Promise.all(
-      personIds.map((personId) => this.personDetailsById(Number(personId))),
-    );
-    const peopleById = new Map(
-      personIds.map((personId, index) => [Number(personId), people[index]]),
-    );
-
-    const items: SalesListItemReportDto[] = sales.map((sale) => {
-      const voucher = sale?.voucher ?? null;
-      const personResult = peopleById.get(Number(sale?.personId));
-      const principalCustomer = this.formatPersonName(
-        personResult?.data?.fullName,
-      );
-      const saleProducts = sale.saleProducts ?? [];
-      const prices = [
-        ...new Set(
-          saleProducts.map((saleProduct) =>
-            this.formatAmount(saleProduct.price),
-          ),
-        ),
-      ];
-      const products = saleProducts.map((saleProduct) => ({
-        name: saleProduct.name,
-        amount: Number(saleProduct.amount ?? 0),
-        price: this.formatAmount(saleProduct.price),
-      }));
-
-      return {
-        code: this.formatSaleCode(sale.code, sale.createdAt),
-        receptionDate: voucher?.createdAt
-          ? this.formatDate(voucher.createdAt)
-          : null,
-        principalCustomer,
-        service: products
-          .map((product) => product.name)
-          .filter(Boolean)
-          .join(' / '),
-        amount: products.reduce((total, product) => total + product.amount, 0),
-        price: prices.join(' / '),
-        products,
-        paymentType: voucher?.paymentType?.name ?? '',
-        total: `${this.formatAmount(voucher?.total ?? null)} ${
-          sale?.parameter?.currencySymbol ?? ''
-        }`.trim(),
-        receptionist: sale?.receptionist ?? '',
-      };
-    });
-
-    const data = {
-      sales: items,
-      totalItems,
-      pagination: hasLimit
-        ? {
-            page,
-            limit: normalizedLimit,
-            totalItems,
-            totalPages: Math.ceil(totalItems / normalizedLimit),
-            hasPreviousPage: page > 1,
-            hasNextPage: page * normalizedLimit < totalItems,
-          }
-        : null,
-      filters: {
-        dateFrom: dateRange.from ? this.formatDate(dateRange.from) : null,
-        dateTo: dateRange.to ? this.formatDate(dateRange.to) : null,
-      },
-      metadata: {
-        source: 'Sales',
-        generatedFor: 'reportSales',
-        generatedAt: this.formatDate(new Date()),
-      },
-    };
 
     return {
       error: false,
       message: 'Listado de ventas obtenido correctamente.',
-      data,
+      //data,
     };
+
   }
 
   private isThirdPartyPayer(
@@ -3055,4 +2912,56 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       data,
     };
   }
+
+  async forGenerateReport(): Promise<any> {
+    
+    const groups = await this.groupsRepository.find({
+      select: {
+        id: true,
+        name: true,
+        shortened: true,
+        accountId: true,
+      },
+    });
+
+    return {
+      error: false,
+      message: 'Grupos obtenidos correctamente',
+      data: groups,
+    };
+
+  }
+
+  async cancelSale(saleId: string): Promise<any> {
+
+    const sale = await this.salesRepository.findOne({
+      where: { id: Number(saleId) },
+    });
+
+    if (!sale) {
+      return {
+        error: true,
+        message: `No se encontró la venta con ID ${saleId}`,
+        data: null,
+      };
+    }
+
+    if (sale.saleState === SaleState.ANULADO) {
+      return {
+        error: true,
+        message: `La venta con ID ${saleId} ya está anulada`,
+        data: null,
+      };
+    }
+
+    sale.saleState = SaleState.ANULADO;
+    await this.salesRepository.save(sale);
+
+    return {
+      error: false,
+      message: `Venta con ID ${saleId} anulada correctamente`,
+      data: null,
+    }
+  }
+
 }
