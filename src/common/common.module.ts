@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { NATS_SERVICE, NastEnvs } from 'src/config';
+import { NATS_SERVICE, natsEnvs } from 'src/config';
 import { NatsService } from './nats/nats.service';
 @Global()
 @Module({
@@ -10,7 +10,7 @@ import { NatsService } from './nats/nats.service';
         name: NATS_SERVICE,
         transport: Transport.NATS,
         options: {
-          servers: NastEnvs.natsServers,
+          servers: natsEnvs.natsServers,
         },
       },
     ]),
@@ -22,7 +22,7 @@ import { NatsService } from './nats/nats.service';
         name: NATS_SERVICE,
         transport: Transport.NATS,
         options: {
-          servers: NastEnvs.natsServers,
+          servers: natsEnvs.natsServers,
         },
       },
     ]),

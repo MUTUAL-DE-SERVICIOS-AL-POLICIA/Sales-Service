@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { NastEnvs } from './config';
+import { natsEnvs } from './config';
 import {
   RpcCustomExceptionFilter,
   BadRequestCustomExceptionFilter,
@@ -14,7 +14,7 @@ async function bootstrap() {
     {
       transport: Transport.NATS,
       options: {
-        servers: NastEnvs.natsServers,
+        servers: natsEnvs.natsServers,
       },
     },
   );

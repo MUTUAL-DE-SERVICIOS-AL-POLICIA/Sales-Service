@@ -1,52 +1,42 @@
-## Descripción
+# Sales Service
 
-[Nest] Plantilla para crear nuevos proyectos enfocado a micro servicios.
+Microservicio NestJS para la gestion de ventas y sus catalogos base.
 
-## Clonar el repositorio y agregarle un nombre nuevo del nuevo proyecto
+## Instalacion
 
 ```bash
-git clone https://github.com/MUTUAL-DE-SERVICIOS-AL-POLICIA/template-microservice.git nombre-service
+cp .env.example .env
+pnpm install
 ```
 
-## Inicializar proyecto
+La base utiliza el esquema configurado en `DB_SCHEMA` (`sales` por defecto).
+Los seeders mantienen seguimiento de ejecucion mediante `track = true`.
+
+## Base De Datos
+
+Las migraciones se encuentran en `src/database/migrations` y los seeders en
+`src/database/seeds`.
 
 ```bash
-# Entrar al repositorio clonado con el nuevo nombre del proyecto
-cd nombre-microservice
-
-# Elimina el origen remoto actual,
-git remote remove origin
-
-# Crear el archivo .env en base al .env.example
-cp .env.example .env
-
-# Instalar las dependencias
-pnpm install
-
-# Correr proyecto en modo desarrollo
-pnpm run start:dev
-
-# Crear nuevo Modulo
-nest g res nombreModulo
-
-# Crear un seeder
-pnpm seed:create --name src/database/seeds/nombre_seed.ts
-# Correr seeder
-pnpm seed:run --name src/database/seeds/{code}-nombre_seed.ts
-
-# Crear migración
-pnpm typeorm migration:create src/database/migrations/NombreDeLaMigración
-# Correr migración
-pnpm migration:run
-# Revertir migración
-pnpm migration:revert
-# Ver estado de migraciones
+# Crear o consultar migraciones
+pnpm migration:create nombre-de-la-migracion
 pnpm migration:show
 
-# Para enlazar a un nuevo repositorio
-git remote add origin https://github.com/tu-usuario/{nombre_nuevo-microservice}.git
-git add .
-git commit -m "Inicialización del nuevo proyecto"
-git branch -M main
-git push -u origin main
+# Preparar datos iniciales
+pnpm migration:run
+pnpm build
+pnpm seed:run
+
+# Crear nuevos seeders o revertir una migracion
+pnpm seed:create nombre-del-seeder
+pnpm migration:revert
+```
+
+La compilacion previa al seeder permite que `typeorm-extension` ejecute los
+archivos actuales.
+
+## Desarrollo
+
+```bash
+pnpm start:dev
 ```
