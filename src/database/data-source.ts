@@ -1,24 +1,57 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { SeederOptions } from 'typeorm-extension';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
-import { DbEnvs } from 'src/config';
+import { dbEnvs } from 'src/config';
+
+const databaseSchema = dbEnvs.dbSchema;
+
+const quoteIdentifier = (identifier: string) =>
+  `"${identifier.replace(/"/g, '""')}"`;
+
+async function ensureDatabaseSchema(dataSource: DataSource) {
+  const queryRunner = dataSource.createQueryRunner();
+
+  await queryRunner.connect();
+  try {
+    await queryRunner.query(
+      `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(databaseSchema)}`,
+    );
+  } finally {
+    await queryRunner.release();
+  }
+}
 
 export const options: DataSourceOptions & SeederOptions = {
   type: 'postgres' as const,
-  host: DbEnvs.dbHost,
-  port: DbEnvs.dbPort,
-  database: DbEnvs.dbDatabase,
-  username: DbEnvs.dbUsername,
-  password: DbEnvs.dbPassword,
-  synchronize: DbEnvs.dbSynchronize,
+  host: dbEnvs.dbHost,
+  port: dbEnvs.dbPort,
+  database: dbEnvs.dbDatabase,
+  username: dbEnvs.dbUsername,
+  password: dbEnvs.dbPassword,
+  synchronize: dbEnvs.dbSynchronize,
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
   namingStrategy: new SnakeNamingStrategy(),
 
-  seeds: ['src/database/seeds/**/*{.ts,.js}'],
+  seeds: [__dirname + '/seeds/**/*{.ts,.js}'],
   seedTracking: true,
 
-  schema: DbEnvs.dbSchema,
-  migrations: ['dist/database/migrations/**/*{.ts,.js}'],
+  schema: databaseSchema,
+  migrationsTableName: 'migrations',
+  migrations: [__dirname + '/migrations/**/*{.ts,.js}'],
 };
 
-export default new DataSource(options);
+export class SchemaAwareDataSource extends DataSource {
+  override async initialize(): Promise<this> {
+    await super.initialize();
+
+    try {
+      await ensureDatabaseSchema(this);
+      return this;
+    } catch (error) {
+      await this.destroy();
+      throw error;
+    }
+  }
+}
+
+export default new SchemaAwareDataSource(options);

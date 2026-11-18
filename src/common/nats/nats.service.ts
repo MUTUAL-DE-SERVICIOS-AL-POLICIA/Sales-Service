@@ -5,7 +5,7 @@ import { catchError, map } from 'rxjs/operators';
 import { NATS_SERVICE } from '../../config';
 
 export class NatsService {
-  private logger = new Logger('MicroserviceUtils');
+  private readonly logger = new Logger('MicroserviceUtils');
 
   constructor(@Inject(NATS_SERVICE) private readonly client: ClientProxy) {}
 
@@ -23,15 +23,20 @@ export class NatsService {
     return firstValueFrom(
       this.client.send(service, data).pipe(
         map((response) => {
-          if (Array.isArray(response)) {
-            return {
-              data: response,
-              serviceStatus: true,
-            };
-          }
           return {
-            ...response,
-            serviceStatus: true,
+            serviceStatus:
+              response !== null &&
+              typeof response === 'object' &&
+              typeof response.serviceStatus === 'boolean'
+                ? response.serviceStatus
+                : true,
+            data:
+              response !== null &&
+              typeof response === 'object' &&
+              !Array.isArray(response) &&
+              Object.prototype.hasOwnProperty.call(response, 'data')
+                ? response.data
+                : response,
           };
         }),
         catchError((error) => {
@@ -41,7 +46,7 @@ export class NatsService {
           );
           return of({
             serviceStatus: false,
-            message: 'Microservice call failed',
+            data: null,
           });
         }),
       ),
@@ -56,10 +61,25 @@ export class NatsService {
     if (!this.isValidParams(params)) {
       return null;
     }
-    const data = await this.firstValue(service, params);
-    if (!data) return null;
-    keysToOmit.forEach((key) => delete data[key]);
-    return data;
+
+    const { serviceStatus, data } = await this.firstValue(service, params);
+
+    if (
+      !serviceStatus ||
+      data === null ||
+      typeof data !== 'object' ||
+      Array.isArray(data)
+    ) {
+      return { serviceStatus, data };
+    }
+
+    const filteredData = { ...data };
+    keysToOmit.forEach((key) => delete filteredData[key]);
+
+    return {
+      serviceStatus,
+      data: filteredData,
+    };
   }
 
   async firstValueInclude(
@@ -70,14 +90,25 @@ export class NatsService {
     if (!this.isValidParams(params)) {
       return null;
     }
-    const data = await this.firstValue(service, params);
-    if (!data) return null;
+
+    const { serviceStatus, data } = await this.firstValue(service, params);
+
+    if (
+      !serviceStatus ||
+      data === null ||
+      typeof data !== 'object' ||
+      Array.isArray(data)
+    ) {
+      return { serviceStatus, data };
+    }
+
     const filteredData = Object.fromEntries(
       keysToInclude.filter((key) => key in data).map((key) => [key, data[key]]),
     );
+
     return {
-      ...filteredData,
-      serviceStatus: data.serviceStatus,
+      serviceStatus,
+      data: filteredData,
     };
   }
 }
